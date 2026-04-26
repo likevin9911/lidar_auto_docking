@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<launch>
+  <arg name="dock_file"
+       default="$(find lidar_auto_docking)/initial_dock_pose/init_dock.json"/>
+
+  <node name="dock_coordinates_node" pkg="lidar_auto_docking"
+        type="dock_coordinates" output="screen">
+    <remap from="lidar/scan" to="lidar/scan"/>
+    <param name="reset_goal_button" value="1"/>
+  </node>
+
+  <node name="dock_saver_node" pkg="lidar_auto_docking"
+        type="dock_saver.py" output="screen">
+    <param name="load_file_path" value="$(arg dock_file)"/>
+  </node>
+</launch>

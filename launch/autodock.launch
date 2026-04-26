@@ -1,0 +1,15 @@
+<?xml version="1.0" ?>
+<launch>
+  <node name="autodock_node" pkg="lidar_auto_docking"
+        type="auto_dock" output="screen">
+    <remap from="scan"    to="filtered_scan"/>
+    <remap from="cmd_vel" to="autodock/cmd_vel"/>
+    <param name="retries"                      value="6"/>
+    <param name="abort_distance"               value="0.37"/>
+    <param name="abort_angle"                  value="0.10"/>
+    <param name="y_abort_threshold"            value="0.05"/>
+    <param name="connector_clearance_distance" value="0.41"/>
+    <param name="docked_distance_threshold"    value="0.31"/>
+  </node>
+</launch>
+

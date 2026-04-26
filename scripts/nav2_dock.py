@@ -1,70 +1,51 @@
 #!/usr/bin/env python3
-...
-
-
-from action_msgs.msg import GoalStatus
-from std_msgs.msg import Int32
-from lidar_auto_docking.action import Dock
-from lidar_auto_docking.action import Undock
-from nav2_msgs.action import NavigateToPose
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-
+"""
+ROS1 port of nav2_dock.py
+Replaces: nav2_msgs NavigateToPose → move_base MoveBaseAction
+          rclpy_action              → actionlib
+          QoSProfile                → standard rospy subscriber
+"""
+import rospy
 import json
-import rclpy
-from rclpy.action import ActionClient
-from rclpy.node import Node
+import actionlib
+from std_msgs.msg import Int32
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from lidar_auto_docking.msg import DockAction, DockGoal, UndockAction, UndockGoal
 
 
 class undocking_client:
-    def __init__(self, action_client):
-        self._action_client = action_client
+    def __init__(self):
+        self.client = actionlib.SimpleActionClient('Undock', UndockAction)
         self.goal_status = False
         self.goal_accept_status = False
         self.failure_flag = False
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            print("Goal Rejected")
-            self.goal_accept_status = False
-            return
+    def send_goal(self):
+        rospy.loginfo("Waiting for Undock server...")
+        self.client.wait_for_server()
+        goal = UndockGoal()
+        goal.rotate_in_place = True
+        rospy.loginfo("Sending undock goal")
+        self.client.send_goal(goal,
+                              done_cb=self.done_cb,
+                              active_cb=self.active_cb)
 
-        print("Goal accepted")
+    def active_cb(self):
         self.goal_accept_status = True
 
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-
-        result = future.result().result
-        status = future.result().status
-        if status == GoalStatus.STATUS_SUCCEEDED:
-            print("Undocking Succeeded!")
+    def done_cb(self, state, result):
+        if state == actionlib.GoalStatus.SUCCEEDED:
+            rospy.loginfo("Undocking succeeded!")
             self.goal_status = True
-            print(str(result.undocked))
         else:
-            print("Undocking Failed!")
+            rospy.logwarn("Undocking failed!")
             self.goal_status = False
             self.failure_flag = True
 
-    def send_goal(self):
-        print("Waiting for action server")
-        self._action_client.wait_for_server()
-        goal_msg = Undock.Goal()
-        goal_msg.rotate_in_place = True
-        print("Sending goal request")
-
-        self._send_goal_future = self._action_client.send_goal_async(goal_msg)
-
-        self._send_goal_future.add_done_callback(self.goal_response_callback)
-
     def get_status(self):
-        status = {}
-        status["gs"] = self.goal_status
-        status["gas"] = self.goal_accept_status
-        status["f_flag"] = self.failure_flag
-        return status
+        return {"gs": self.goal_status,
+                "gas": self.goal_accept_status,
+                "f_flag": self.failure_flag}
 
     def reset_status(self):
         self.goal_status = False
@@ -73,57 +54,43 @@ class undocking_client:
 
 
 class docking_client:
-    def __init__(self, action_client):
-        self._action_client = action_client
+    def __init__(self):
+        self.client = actionlib.SimpleActionClient('Dock', DockAction)
         self.goal_status = False
         self.goal_accept_status = False
         self.failure_flag = False
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            print("goal rejected")
-            self.goal_accept_status = False
-            return
+    def send_goal(self, dock_pose):
+        rospy.loginfo("Waiting for Dock server...")
+        self.client.wait_for_server()
+        goal = DockGoal()
+        goal.dock_pose.header.frame_id = "map"
+        goal.dock_pose.header.stamp = rospy.Time.now()
+        goal.dock_pose.pose.position.x = dock_pose["x"]
+        goal.dock_pose.pose.position.y = dock_pose["y"]
+        goal.dock_pose.pose.orientation.z = dock_pose["z"]
+        goal.dock_pose.pose.orientation.w = dock_pose["w"]
+        rospy.loginfo("Sending dock goal")
+        self.client.send_goal(goal,
+                              done_cb=self.done_cb,
+                              active_cb=self.active_cb)
 
-        print("goal accepted")
+    def active_cb(self):
         self.goal_accept_status = True
 
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-        result = future.result().result
-        status = future.result().status
-        if status == GoalStatus.STATUS_SUCCEEDED:
-            print("docking succeeded")
+    def done_cb(self, state, result):
+        if state == actionlib.GoalStatus.SUCCEEDED:
+            rospy.loginfo("Docking succeeded!")
             self.goal_status = True
         else:
-            print("docking failed ")
+            rospy.logwarn("Docking failed!")
             self.goal_status = False
             self.failure_flag = True
 
-    def send_goal(self, dock_pose):
-        print("waiting for action server")
-        self._action_client.wait_for_server()
-        goal_msg = Dock.Goal()
-        goal_msg.dock_pose.pose.position.x = dock_pose["x"]
-        goal_msg.dock_pose.pose.position.y = dock_pose["y"]
-        goal_msg.dock_pose.pose.orientation.z = dock_pose["z"]
-        goal_msg.dock_pose.pose.orientation.w = dock_pose["w"]
-        goal_msg.dock_pose.header.frame_id = "map"
-        # fill up the rest later
-        print("Sending goal request")
-        self._send_goal_future = self._action_client.send_goal_async(goal_msg)
-
-        self._send_goal_future.add_done_callback(self.goal_response_callback)
-
     def get_status(self):
-        status = {}
-        status["gs"] = self.goal_status
-        status["gas"] = self.goal_accept_status
-        status["f_flag"] = self.failure_flag
-        return status
+        return {"gs": self.goal_status,
+                "gas": self.goal_accept_status,
+                "f_flag": self.failure_flag}
 
     def reset_status(self):
         self.goal_status = False
@@ -132,58 +99,45 @@ class docking_client:
 
 
 class goto_pose:
-    def __init__(self, action_client):
-        self._action_client = action_client
+    def __init__(self):
+        # ROS1: move_base replaces nav2 NavigateToPose
+        self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
         self.goal_status = False
         self.goal_accept_status = False
         self.failure_flag = False
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            print("nav2 Goal Rejected")
-            self.goal_accept_status = False
-            return
+    def send_goal(self, goal_pose):
+        rospy.loginfo("Waiting for move_base server...")
+        self.client.wait_for_server()
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = "map"
+        goal.target_pose.header.stamp = rospy.Time.now()
+        goal.target_pose.pose.position.x = goal_pose["bx"]
+        goal.target_pose.pose.position.y = goal_pose["by"]
+        goal.target_pose.pose.orientation.z = goal_pose["bz"]
+        goal.target_pose.pose.orientation.w = goal_pose["bw"]
+        rospy.loginfo("Sending navigation goal")
+        self.client.send_goal(goal,
+                              done_cb=self.done_cb,
+                              active_cb=self.active_cb)
 
-        print("nav2 Goal accepted")
+    def active_cb(self):
         self.goal_accept_status = True
+        rospy.loginfo("Navigation goal accepted")
 
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-
-        result = future.result().result
-        status = future.result().status
-        if status == GoalStatus.STATUS_SUCCEEDED:
-            print("navigation succeeded")
+    def done_cb(self, state, result):
+        if state == actionlib.GoalStatus.SUCCEEDED:
+            rospy.loginfo("Navigation succeeded!")
             self.goal_status = True
         else:
-            print("navigation failed!")
+            rospy.logwarn("Navigation failed!")
             self.goal_status = False
             self.failure_flag = True
 
-    def send_goal(self, goal_pose):
-        print("Waiting for action server")
-        self._action_client.wait_for_server()
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose.pose.position.x = goal_pose["bx"]
-        goal_msg.pose.pose.position.y = goal_pose["by"]
-        goal_msg.pose.pose.orientation.z = goal_pose["bz"]
-        goal_msg.pose.pose.orientation.w = goal_pose["bw"]
-        # fill up the rest later
-        print("Sending goal request")
-
-        self._send_goal_future = self._action_client.send_goal_async(goal_msg)
-
-        self._send_goal_future.add_done_callback(self.goal_response_callback)
-
     def get_status(self):
-        status = {}
-        status["gs"] = self.goal_status
-        status["gas"] = self.goal_accept_status
-        status["f_flag"] = self.failure_flag
-        return status
+        return {"gs": self.goal_status,
+                "gas": self.goal_accept_status,
+                "f_flag": self.failure_flag}
 
     def reset_status(self):
         self.goal_status = False
@@ -191,114 +145,84 @@ class goto_pose:
         self.failure_flag = False
 
 
-class MainLogic(Node):
+class MainLogic:
     def __init__(self):
-        super().__init__("dock_logic")
+        rospy.init_node('dock_logic')
+
         self.dock_cmd = 0
         self.dock_stat = 0
-        self.timer = self.create_timer(0.1, self.timed_callback)
-        self.qos_profile_ = QoSProfile(
-            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
-            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
-            depth=10,
-        )
-        self.subscription = self.create_subscription(
-            Int32, "dock_cmd", self.update_cmd, self.qos_profile_
-        )
-        self.status_publisher = self.create_publisher(Int32, "dock_status", 10)
-        self.goto_pose_ = goto_pose(
-            ActionClient(self, NavigateToPose, "navigate_to_pose")
-        )
-        self.docking_client_ = docking_client(ActionClient(self, Dock, "Dock"))
-        self.declare_parameter("load_file_path")
 
-        self.undocking_client_ = undocking_client(ActionClient(self, Undock, "Undock"))
-        self.dock_file_path = (
-            self.get_parameter("load_file_path").get_parameter_value().string_value
-        )
-        # load in dock coordinates
-        with open(self.dock_file_path) as outfile:
-            self.initial_poses = json.load(outfile)
+        dock_file_path = rospy.get_param('~load_file_path')
+        with open(dock_file_path) as f:
+            self.initial_poses = json.load(f)
+
+        self.goto_pose_ = goto_pose()
+        self.docking_client_ = docking_client()
+        self.undocking_client_ = undocking_client()
+
+        self.cmd_sub = rospy.Subscriber('dock_cmd', Int32, self.update_cmd)
+        self.status_pub = rospy.Publisher('dock_status', Int32, queue_size=10)
+
+        self.timer = rospy.Timer(rospy.Duration(0.1), self.timed_callback)
 
     def update_cmd(self, msg):
         self.dock_cmd = msg.data
 
-    def timed_callback(self):
-        # update status of all classes
-        nav2_status = self.goto_pose_.get_status()
-        dock_status = self.docking_client_.get_status()
+    def timed_callback(self, event):
+        nav_status   = self.goto_pose_.get_status()
+        dock_status  = self.docking_client_.get_status()
         undock_status = self.undocking_client_.get_status()
 
-        # check failure flags
-        if (
-            nav2_status["f_flag"] == True
-            or dock_status["f_flag"] == True
-            or undock_status["f_flag"] == True
-        ) and self.dock_stat != 10:
-            print("Docking failure!")
+        # Failure check
+        if (nav_status["f_flag"] or dock_status["f_flag"] or
+                undock_status["f_flag"]) and self.dock_stat != 10:
+            rospy.logwarn("Docking failure!")
             self.dock_stat = 10
-        # Docking command received. Navigate to initial goal pose first
-        elif self.dock_cmd == 1 and self.dock_stat == 0:
 
+        # State machine — mirrors original nav2_dock.py logic
+        elif self.dock_cmd == 1 and self.dock_stat == 0:
             self.goto_pose_.send_goal(self.initial_poses)
             self.dock_stat = 1
-        # Engage in docking sequence once the robot has reached the goal
-        elif (
-            self.dock_stat == 1
-            and nav2_status["gs"] == True
-            and nav2_status["gas"] == True
-        ):
-            print("docking robot!")
+
+        elif (self.dock_stat == 1 and
+              nav_status["gs"] and nav_status["gas"]):
+            rospy.loginfo("Arrived at pre-dock pose, starting dock sequence")
             self.docking_client_.send_goal(self.initial_poses)
             self.dock_stat = 2
-        # once the robot has docked, we will wait for an input to undock.
-        elif (
-            self.dock_stat == 2
-            and dock_status["gs"] == True
-            and dock_status["gas"] == True
-        ):
-            print("Waiting for undock command!")
+
+        elif (self.dock_stat == 2 and
+              dock_status["gs"] and dock_status["gas"]):
+            rospy.loginfo("Docked! Waiting for undock command...")
             self.dock_stat = 3
-        # Undock command received. Will initiate undocking sequence.
+
         elif self.dock_stat == 3 and self.dock_cmd == 2:
-            print("undocking")
+            rospy.loginfo("Undocking...")
             self.undocking_client_.send_goal()
             self.dock_stat = 4
-        # Once undocking sequence is complete, reset all boolean flags.
-        elif (
-            self.dock_stat == 4
-            and undock_status["gs"] == True
-            and undock_status["gas"] == True
-        ):
-            print("Docking Sequence Complete")
+
+        elif (self.dock_stat == 4 and
+              undock_status["gs"] and undock_status["gas"]):
+            rospy.loginfo("Docking sequence complete, resetting")
             self.dock_stat = 0
             self.undocking_client_.reset_status()
             self.docking_client_.reset_status()
             self.goto_pose_.reset_status()
+
         elif self.dock_stat == 10 and self.dock_cmd == 10:
-            print("Resetting docking state!")
+            rospy.loginfo("Resetting docking state after failure")
             self.dock_stat = 0
             self.undocking_client_.reset_status()
             self.docking_client_.reset_status()
             self.goto_pose_.reset_status()
 
-        self.pub_dock_status(self.dock_stat)
-
-    def pub_dock_status(self, stat):
         msg = Int32()
-        msg.data = stat
-        self.status_publisher.publish(msg)
+        msg.data = self.dock_stat
+        self.status_pub.publish(msg)
 
 
-def main(args=None):
-    rclpy.init(args=args)
-
-    action_client = MainLogic()
-
-    rclpy.spin(action_client)
-
-    action_client.destroy_node()
-    rclpy.shutdown()
+def main():
+    node = MainLogic()
+    rospy.spin()
 
 
 if __name__ == "__main__":

@@ -1,98 +1,62 @@
 #!/usr/bin/env python3
-...
-
-
-from action_msgs.msg import GoalStatus
-from lidar_auto_docking.action import Dock
-
-import rclpy
+import rospy
 import json
-from rclpy.action import ActionClient
-from rclpy.node import Node
+import actionlib
+from lidar_auto_docking.msg import DockAction, DockGoal
+from geometry_msgs.msg import PoseStamped
 
 
 class docking_client:
-    def __init__(self, action_client):
-        self._action_client = action_client
+    def __init__(self):
+        self.client = actionlib.SimpleActionClient('Dock', DockAction)
         self.goal_status = False
-        self.goal_accept_status = False
-
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            print("goal rejected")
-            self.goal_accept_status = False
-            return
-
-        print("goal accepted")
-        self.goal_accept_status = True
-
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-        result = future.result().result
-        status = future.result().status
-        if status == GoalStatus.STATUS_SUCCEEDED:
-            print("goal succeeded")
-            self.goal_status = True
-        else:
-            print("goal failed ")
-            self.goal_status = False
 
     def send_goal(self, dock_pose):
-        print("waiting for action server")
-        self._action_client.wait_for_server()
-        goal_msg = Dock.Goal()
-        goal_msg.dock_pose.pose.position.x = dock_pose["x"]
-        goal_msg.dock_pose.pose.position.y = dock_pose["y"]
-        goal_msg.dock_pose.pose.orientation.z = dock_pose["z"]
-        goal_msg.dock_pose.pose.orientation.w = dock_pose["w"]
-        goal_msg.dock_pose.header.frame_id = "map"
-        # fill up the rest later
-        print("Sending goal request")
-        self._send_goal_future = self._action_client.send_goal_async(goal_msg)
+        rospy.loginfo("Waiting for Dock action server...")
+        self.client.wait_for_server()
 
-        self._send_goal_future.add_done_callback(self.goal_response_callback)
+        goal = DockGoal()
+        goal.dock_pose.header.frame_id = "map"
+        goal.dock_pose.header.stamp = rospy.Time.now()
+        goal.dock_pose.pose.position.x = dock_pose["x"]
+        goal.dock_pose.pose.position.y = dock_pose["y"]
+        goal.dock_pose.pose.orientation.z = dock_pose["z"]
+        goal.dock_pose.pose.orientation.w = dock_pose["w"]
+
+        rospy.loginfo("Sending dock goal...")
+        self.client.send_goal(goal,
+                              done_cb=self.done_cb,
+                              active_cb=self.active_cb)
+
+    def active_cb(self):
+        rospy.loginfo("Dock goal accepted")
+
+    def done_cb(self, state, result):
+        if state == actionlib.GoalStatus.SUCCEEDED:
+            rospy.loginfo("Docking succeeded!")
+            self.goal_status = True
+        else:
+            rospy.logwarn("Docking failed with state: %d", state)
+            self.goal_status = False
 
     def get_status(self):
-        status = {}
-        status["gs"] = self.goal_status
-        status["gas"] = self.goal_accept_status
-        return status
+        return {"gs": self.goal_status}
 
     def reset_status(self):
         self.goal_status = False
-        self.goal_accept_status = False
 
 
-class dock(Node):
-    def __init__(self):
-        super().__init__("minimal_action_client")
-        self.docking_client_ = docking_client(ActionClient(self, Dock, "Dock"))
-        self.declare_parameter("load_file_path")
-        self.dock_file_path = (
-            self.get_parameter("load_file_path").get_parameter_value().string_value
-        )
-        # load in dock coordinates
-        with open(self.dock_file_path) as outfile:
-            self.initial_dock_pose = json.load(outfile)
+def main():
+    rospy.init_node('dock_robot')
 
-    def send_goal(self):
-        self.docking_client_.send_goal(self.initial_dock_pose)
+    dock_file_path = rospy.get_param('~load_file_path')
+    with open(dock_file_path) as f:
+        initial_dock_pose = json.load(f)
 
+    client = docking_client()
+    client.send_goal(initial_dock_pose)
 
-def main(args=None):
-    rclpy.init(args=args)
-
-    action_client = dock()
-
-    action_client.send_goal()
-
-    rclpy.spin(action_client)
-
-    action_client.destroy_node()
-    rclpy.shutdown()
+    rospy.spin()
 
 
 if __name__ == "__main__":

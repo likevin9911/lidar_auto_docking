@@ -2,30 +2,24 @@
 
 void tf2_listener::waitTransform(std::string origin, std::string destination) {
   std::string warning_msg;
-  while (rclcpp::ok() &&
-         !buffer_.canTransform(origin, destination, tf2::TimePoint(),
+  while (ros::ok() &&
+         !buffer_.canTransform(origin, destination, ros::Time(0),
                                &warning_msg)) {
-    std::cout << "waiting: " << warning_msg << "\n";
-    rate.sleep();
+    ROS_WARN_THROTTLE(1.0, "Waiting for transform %s -> %s: %s",
+                      origin.c_str(), destination.c_str(), warning_msg.c_str());
+    rate_.sleep();
   }
 }
 
-geometry_msgs::msg::TransformStamped tf2_listener::getTransform(
+geometry_msgs::TransformStamped tf2_listener::getTransform(
     std::string origin, std::string destination) {
-  geometry_msgs::msg::TransformStamped echo_transform;
-  echo_transform =
-      buffer_.lookupTransform(origin, destination, tf2::TimePoint());
-
-  return echo_transform;
+  return buffer_.lookupTransform(origin, destination, ros::Time(0));
 }
 
 void tf2_listener::transformPose(std::string tracking_frame,
-                                 geometry_msgs::msg::PoseStamped &input_pose,
-                                 geometry_msgs::msg::PoseStamped &output_pose) {
-  // firstly, get the correct desired transformation.
-  geometry_msgs::msg::TransformStamped corrective_transform;
-  corrective_transform =
+                                 geometry_msgs::PoseStamped& input_pose,
+                                 geometry_msgs::PoseStamped& output_pose) {
+  geometry_msgs::TransformStamped corrective_transform =
       getTransform(tracking_frame, input_pose.header.frame_id);
-  // transform the input pose to be referenced to the main tracking frame.
   tf2::doTransform(input_pose, output_pose, corrective_transform);
 }

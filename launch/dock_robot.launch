@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<launch>
+  <arg name="dock_file"
+       default="$(find lidar_auto_docking)/initial_dock_pose/init_dock.json"/>
+
+  <include file="$(find lidar_auto_docking)/launch/autodock.launch"/>
+
+  <node name="dock_robot_node" pkg="lidar_auto_docking"
+        type="dock_robot.py" output="screen">
+    <param name="load_file_path" value="$(arg dock_file)"/>
+  </node>
+</launch>

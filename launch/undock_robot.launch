@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<launch>
+  <include file="$(find lidar_auto_docking)/launch/autodock.launch"/>
+
+  <node name="undock_robot_node" pkg="lidar_auto_docking"
+        type="undock_robot.py" output="screen"/>
+</launch>
+
